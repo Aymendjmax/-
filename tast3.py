@@ -8,6 +8,7 @@ import time
 import sqlite3
 import schedule
 import requests
+from flask import Flask, Response
 
 # تكوين السجلات
 logging.basicConfig(
@@ -21,10 +22,16 @@ CHANNEL_USERNAME = os.getenv('CHANNEL_USERNAME', '@Aymen_dj_max')
 CHANNEL_ID = int(os.getenv('CHANNEL_ID', '-1002807434205'))  # تحويل إلى عدد صحيح
 DEVELOPER_USERNAME = os.getenv('DEVELOPER_USERNAME', '@Akio_co')
 BOT_TOKEN = os.getenv('BOT_TOKEN')  # التوكن من متغيرات البيئة فقط
-PING_URL = os.getenv('PING_URL')  # رابط Ping من UptimeRobot
 
 # تهيئة البوت
 bot = telebot.TeleBot(BOT_TOKEN)
+
+# تهيئة Flask
+app = Flask(__name__)
+
+@app.route('/ping')
+def ping():
+    return Response("Bot is alive!", status=200, mimetype='text/plain')
 
 # تخزين بيانات المستخدمين في قاعدة البيانات
 def init_db():
@@ -749,17 +756,9 @@ def schedule_reminders():
         schedule.run_pending()
         time.sleep(60)
 
-def ping_server():
-    """إرسال طلبات Ping للحفاظ على التشغيل"""
-    while True:
-        try:
-            if PING_URL:
-                requests.get(PING_URL)
-                logger.info("Ping sent successfully")
-            time.sleep(300)  # كل 5 دقائق
-        except Exception as e:
-            logger.error(f"Ping error: {e}")
-            time.sleep(60)
+def run_flask_app():
+    """تشغيل خادم Flask"""
+    app.run(host='0.0.0.0', port=10000)
 
 # تشغيل البوت
 if __name__ == '__main__':
@@ -770,9 +769,9 @@ if __name__ == '__main__':
         reminder_thread = threading.Thread(target=schedule_reminders, daemon=True)
         reminder_thread.start()
         
-        # بدء خيط Ping للحفاظ على التشغيل
-        ping_thread = threading.Thread(target=ping_server, daemon=True)
-        ping_thread.start()
+        # بدء خيط خادم الويب
+        web_thread = threading.Thread(target=run_flask_app, daemon=True)
+        web_thread.start()
         
         # تشغيل البوت
         bot.infinity_polling(none_stop=True, timeout=30)
