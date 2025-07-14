@@ -296,7 +296,7 @@ def update_main_menu(user_id, chat_id):
             )
         else:
             # إعادة إنشاء القائمة إذا تم حذف الرسالة
-            show_main_menu(types.Message(message_id=0, chat=types.Chat(id=chat_id), from_user=types.User(id=user_id))
+            show_main_menu(types.Message(message_id=0, chat=types.Chat(id=chat_id), from_user=types.User(id=user_id)))
     except Exception as e:
         logger.error(f"Error updating main menu: {e}")
 
