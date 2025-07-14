@@ -17,9 +17,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # متغيرات البيئة
-CHANNEL_USERNAME = os.getenv('CHANNEL_USERNAME', 'Aymen_dj_max')
+CHANNEL_USERNAME = os.getenv('CHANNEL_USERNAME', '@Aymen_dj_max')
 CHANNEL_ID = int(os.getenv('CHANNEL_ID', '-1002807434205'))  # تحويل إلى عدد صحيح
-DEVELOPER_USERNAME = os.getenv('DEVELOPER_USERNAME', 'Akio_co')
+DEVELOPER_USERNAME = os.getenv('DEVELOPER_USERNAME', '@Akio_co')
 BOT_TOKEN = os.getenv('BOT_TOKEN')  # التوكن من متغيرات البيئة فقط
 PING_URL = os.getenv('PING_URL')  # رابط Ping من UptimeRobot
 
