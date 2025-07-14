@@ -390,13 +390,14 @@ def handle_dhikr_callback(call):
         # تحديث المستوى
         level_msg = update_user_level(user_id)
         
-        # رسالة التأكيد
+        # رسالة التأكيد (إشعار غير مزعج)
         confirm_msg = f"✅ {info['response']}\n💎 +10 حسنات بإذن الله"
         
         if level_msg:
             confirm_msg += f"\n🎉 {level_msg}"
         
-        bot.answer_callback_query(call.id, confirm_msg, show_alert=True)
+        # إرسال إشعار غير مزعج (بدون show_alert)
+        bot.answer_callback_query(call.id, confirm_msg, show_alert=False)
         
         # تحديث القائمة الرئيسية
         update_main_menu(user_id, call.message.chat.id)
@@ -517,16 +518,17 @@ def developer_info_callback(call):
         bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً")
         return
     
+    # إصلاح رابط المطور
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
-        types.InlineKeyboardButton("💬 مراسلة المطور", url=f"https://t.me/{DEVELOPER_USERNAME[1:]}")
+        types.InlineKeyboardButton("💬 مراسلة المطور", url=f"https://t.me/Akio_co")
     )
     keyboard.add(
         types.InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
     )
     
     bot.edit_message_text(
-        f"👨‍💻 مطور البوت: {DEVELOPER_USERNAME}\n\n"
+        f"👨‍💻 مطور البوت: @Akio_co\n\n"
         "🔧 لأي استفسار، اقتراح، أو مشكلة تقنية\n"
         "📞 تواصل معنا في أي وقت",
         call.message.chat.id,
@@ -719,14 +721,16 @@ def send_daily_reminders():
         users = c.fetchall()
         conn.close()
         
+        current_hour = datetime.now().hour
+        greeting = "🌅 صباح الخير!" if current_hour < 12 else "🌇 مساء الخير!"
+        message_text = "📿 لا تنس أذكار الصباح" if current_hour < 12 else "📿 لا تنس أذكار المساء"
+        
         for user in users:
             user_id = user[0]
             try:
                 bot.send_message(
                     user_id,
-                    "🌅 صباح الخير!\n"
-                    "📿 لا تنس أذكار الصباح\n"
-                    "🎯 ابدأ يومك بالذكر والتسبيح"
+                    f"{greeting}\n{message_text}\n🎯 ابدأ يومك بالذكر والتسبيح"
                 )
             except Exception as e:
                 logger.error(f"Error sending reminder to user {user_id}: {e}")
