@@ -9,6 +9,7 @@ import sqlite3
 import schedule
 import requests
 from flask import Flask, Response
+import io
 
 # تكوين السجلات
 logging.basicConfig(
@@ -22,6 +23,7 @@ CHANNEL_USERNAME = os.getenv('CHANNEL_USERNAME', '@Aymen_dj_max')
 CHANNEL_ID = int(os.getenv('CHANNEL_ID', '-1002807434205'))  # تحويل إلى عدد صحيح
 DEVELOPER_USERNAME = os.getenv('DEVELOPER_USERNAME', '@Akio_co')
 BOT_TOKEN = os.getenv('BOT_TOKEN')  # التوكن من متغيرات البيئة فقط
+ADMIN_USER_ID = 8199450690  # إضافة معرف الأدمن
 
 # تهيئة البوت
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -48,7 +50,9 @@ def init_db():
                   last_active TEXT,
                   level INTEGER DEFAULT 1,
                   notifications BOOLEAN DEFAULT 1,
-                  joined_date TEXT)''')
+                  joined_date TEXT,
+                  progress INTEGER DEFAULT 0,  # إضافة حقل التقدم
+                  next_level_remaining INTEGER DEFAULT 1000)''')  # إضافة حقل المتبقي للمستوى
     conn.commit()
     conn.close()
 
@@ -68,8 +72,13 @@ default_user_data = {
     'last_active': None,
     'level': 1,
     'notifications': True,
-    'joined_date': None
+    'joined_date': None,
+    'progress': 0,  # إضافة التقدم
+    'next_level_remaining': 1000  # إضافة المتبقي للمستوى
 }
+
+# حالة البوت (تشغيل/إيقاف)
+bot_enabled = True
 
 def get_user_data(user_id):
     conn = sqlite3.connect('users.db')
@@ -90,7 +99,9 @@ def get_user_data(user_id):
             'last_active': user[7],
             'level': user[8],
             'notifications': bool(user[9]),
-            'joined_date': user[10]
+            'joined_date': user[10],
+            'progress': user[11],  # إضافة التقدم
+            'next_level_remaining': user[12]  # إضافة المتبقي للمستوى
         }
     return None
 
@@ -112,21 +123,25 @@ def update_user_data(user_id, data):
                     last_active = ?,
                     level = ?,
                     notifications = ?,
-                    joined_date = ?
+                    joined_date = ?,
+                    progress = ?,
+                    next_level_remaining = ?
                     WHERE user_id = ?''',
                   (data['subhan_count'], data['alhamdulillah_count'], data['la_ilaha_count'],
                    data['allahu_akbar_count'], data['total_count'], data['daily_streak'],
                    data['last_active'], data['level'], notifications_int,
-                   data['joined_date'], user_id))
+                   data['joined_date'], data['progress'], data['next_level_remaining'],
+                   user_id))
     else:
         c.execute('''INSERT INTO users 
                     (user_id, subhan_count, alhamdulillah_count, la_ilaha_count, allahu_akbar_count,
-                     total_count, daily_streak, last_active, level, notifications, joined_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                     total_count, daily_streak, last_active, level, notifications, joined_date,
+                     progress, next_level_remaining)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                   (user_id, data['subhan_count'], data['alhamdulillah_count'], data['la_ilaha_count'],
                    data['allahu_akbar_count'], data['total_count'], data['daily_streak'],
                    data['last_active'], data['level'], notifications_int,
-                   data['joined_date']))
+                   data['joined_date'], data['progress'], data['next_level_remaining']))
     
     conn.commit()
     conn.close()
@@ -423,6 +438,10 @@ def update_user_level(user_id):
         new_level = (total // 1000) + 1
         if new_level > current_level:
             user_data['level'] = new_level
+            # تحديث التقدم والمتبقي للمستوى الجديد
+            current_level_points = (new_level - 1) * 1000
+            user_data['progress'] = total - current_level_points
+            user_data['next_level_remaining'] = new_level * 1000 - total
             update_user_data(user_id, user_data)
             return f"تهانينا! وصلت للمستوى {new_level} 🏆"
         return None
@@ -454,9 +473,11 @@ def reset_counters_callback(call):
     
     user_data = initialize_user_data(user_id)
     
-    # الحفاظ على المستوى والستريك
+    # الحفاظ على المستوى والستريك والتقدم والمتبقي
     current_level = user_data['level']
     current_streak = user_data['daily_streak']
+    progress = user_data['progress']
+    next_level_remaining = user_data['next_level_remaining']
     
     # إعادة تعيين العدادات فقط
     user_data['subhan_count'] = 0
@@ -464,8 +485,12 @@ def reset_counters_callback(call):
     user_data['la_ilaha_count'] = 0
     user_data['allahu_akbar_count'] = 0
     user_data['total_count'] = 0
+    
+    # استعادة البيانات المحفوظة
     user_data['level'] = current_level
     user_data['daily_streak'] = current_streak
+    user_data['progress'] = progress
+    user_data['next_level_remaining'] = next_level_remaining
     
     # تحديث البيانات
     update_user_data(user_id, user_data)
@@ -483,9 +508,12 @@ def share_bot_callback(call):
         bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً")
         return
     
-    share_text = """
-🕌 شارك الخير وكن سبباً في هداية الآخرين 🌹
-
+    user_data = initialize_user_data(user_id)
+    
+    # حساب التقدم والمتبقي للمستوى
+    progress_percent = min(100, int((user_data['progress'] / 1000) * 100) if user_data['progress'] > 0 else 0
+    
+    share_text = f"""
 قال رسول الله ﷺ:
 "من دعا إلى هدى كان له من الأجر مثل أجور من تبعه"
 
@@ -497,13 +525,19 @@ https://t.me/Ryukn_bot
 • نظام المكافآت والمستويات
 • إحصائيات مفصلة
 • تذكيرات يومية
+
+🏆 مستواي الحالي: {user_data['level']}
+🔥 سلسلة أيامي: {user_data['daily_streak']} يوم
+
+🎯 تقدمي: {user_data['progress']}/1000 ({progress_percent}%)
+⏳ المتبقي للمستوى التالي: {user_data['next_level_remaining']} ذكر
     """
     
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton(
             "📤 مشاركة البوت", 
-            url=f"https://t.me/share/url?url=https://t.me/Ryukn_bot&text=بوت نور الذكر - اجمع الحسنات بسهولة"
+            url=f"https://t.me/share/url?url=https://t.me/Ryukn_bot&text={share_text}"
         )
     )
     keyboard.add(
@@ -555,10 +589,7 @@ def show_stats_callback(call):
     
     # حساب التقدم للمستوى التالي
     current_level_points = (user_data['level'] - 1) * 1000
-    next_level_points = user_data['level'] * 1000
-    progress = user_data['total_count'] - current_level_points
-    progress_percent = min(100, int((progress / 1000) * 100)) if progress > 0 else 0
-    remaining = next_level_points - user_data['total_count'] if progress > 0 else 1000
+    progress_percent = min(100, int((user_data['progress'] / 1000) * 100)) if user_data['progress'] > 0 else 0
     
     stats_message = f"""
 📊 إحصائياتك الشخصية:
@@ -573,8 +604,8 @@ def show_stats_callback(call):
 🏆 المستوى: {user_data['level']}
 📅 سلسلة الأيام: {user_data['daily_streak']} يوم
 
-🎯 التقدم: {progress}/1000 ({progress_percent}%)
-⏳ المتبقي للمستوى التالي: {remaining} ذكر
+🎯 التقدم: {user_data['progress']}/1000 ({progress_percent}%)
+⏳ المتبقي للمستوى التالي: {user_data['next_level_remaining']} ذكر
 
 💎 الحسنات المكتسبة: {user_data['total_count'] * 10} حسنة بإذن الله
     """
@@ -646,6 +677,9 @@ def export_data_callback(call):
 📅 تاريخ الانضمام: {user_data['joined_date']}
 📅 آخر نشاط: {user_data['last_active']}
 
+🎯 التقدم: {user_data['progress']}/1000
+⏳ المتبقي للمستوى التالي: {user_data['next_level_remaining']} ذكر
+
 💎 الحسنات المكتسبة: {user_data['total_count'] * 10}
     """
     
@@ -695,6 +729,11 @@ def back_to_main_callback(call):
 @bot.message_handler(func=lambda message: True)
 def handle_text_messages(message):
     user_id = message.from_user.id
+    
+    # التحقق من حالة البوت
+    if not bot_enabled and user_id != ADMIN_USER_ID:
+        bot.reply_to(message, "⛔ البوت متوقف حاليًا عن العمل، يرجى المحاولة لاحقًا")
+        return
     
     if not is_user_subscribed(user_id):
         show_subscription_message(message)
@@ -759,6 +798,162 @@ def schedule_reminders():
 def run_flask_app():
     """تشغيل خادم Flask"""
     app.run(host='0.0.0.0', port=10000)
+
+# نظام الإدارة
+def is_admin(user_id):
+    """التحقق من هوية الأدمن"""
+    return user_id == ADMIN_USER_ID
+
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        bot.reply_to(message, "⛔ هذا الأمر مخصص للإدارة فقط")
+        return
+    
+    keyboard = types.InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        types.InlineKeyboardButton(f"{'⏸️ إيقاف البوت' if bot_enabled else '▶️ تشغيل البوت'}", callback_data="toggle_bot"),
+        types.InlineKeyboardButton("📤 استيراد البيانات", callback_data="import_data")
+    )
+    keyboard.add(
+        types.InlineKeyboardButton("📥 تصدير البيانات", callback_data="export_all_data"),
+        types.InlineKeyboardButton("📨 إنشاء رسالة", callback_data="create_message")
+    )
+    
+    bot.send_message(
+        message.chat.id,
+        "👨‍💻 لوحة إدارة البوت\nاختر الإجراء المطلوب:",
+        reply_markup=keyboard
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data == 'toggle_bot')
+def toggle_bot(call):
+    global bot_enabled
+    user_id = call.from_user.id
+    
+    if not is_admin(user_id):
+        bot.answer_callback_query(call.id, "⛔ غير مسموح لك بهذا الإجراء")
+        return
+    
+    bot_enabled = not bot_enabled
+    status = "✅ تم تشغيل البوت" if bot_enabled else "⏸️ تم إيقاف البوت"
+    bot.answer_callback_query(call.id, status)
+    
+    # تحديث لوحة الإدارة
+    admin_panel(call.message)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'export_all_data')
+def export_all_data(call):
+    user_id = call.from_user.id
+    
+    if not is_admin(user_id):
+        bot.answer_callback_query(call.id, "⛔ غير مسموح لك بهذا الإجراء")
+        return
+    
+    try:
+        # إرسال ملف قاعدة البيانات
+        with open('users.db', 'rb') as db_file:
+            bot.send_document(
+                call.message.chat.id,
+                db_file,
+                caption="📦 ملف قاعدة البيانات لجميع المستخدمين"
+            )
+        bot.answer_callback_query(call.id, "✅ تم تصدير البيانات بنجاح")
+    except Exception as e:
+        logger.error(f"Error exporting data: {e}")
+        bot.answer_callback_query(call.id, "❌ فشل في تصدير البيانات")
+
+@bot.callback_query_handler(func=lambda call: call.data == 'import_data')
+def import_data(call):
+    user_id = call.from_user.id
+    
+    if not is_admin(user_id):
+        bot.answer_callback_query(call.id, "⛔ غير مسموح لك بهذا الإجراء")
+        return
+    
+    msg = bot.send_message(
+        call.message.chat.id,
+        "📤 أرسل ملف قاعدة البيانات الآن (يجب أن يكون باسم users.db)"
+    )
+    bot.register_next_step_handler(msg, process_import_file)
+
+def process_import_file(message):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        return
+    
+    if not message.document:
+        bot.reply_to(message, "❌ لم يتم إرسال ملف، يرجى المحاولة مرة أخرى")
+        return
+    
+    try:
+        # تحميل الملف
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        # حفظ الملف
+        with open('users.db', 'wb') as new_file:
+            new_file.write(downloaded_file)
+        
+        # إعادة تحميل قاعدة البيانات
+        init_db()
+        
+        bot.reply_to(message, "✅ تم استيراد البيانات بنجاح")
+    except Exception as e:
+        logger.error(f"Error importing data: {e}")
+        bot.reply_to(message, "❌ فشل في استيراد البيانات")
+
+@bot.callback_query_handler(func=lambda call: call.data == 'create_message')
+def create_message(call):
+    user_id = call.from_user.id
+    
+    if not is_admin(user_id):
+        bot.answer_callback_query(call.id, "⛔ غير مسموح لك بهذا الإجراء")
+        return
+    
+    msg = bot.send_message(
+        call.message.chat.id,
+        "✍️ اكتب الرسالة التي تريد إرسالها لجميع المستخدمين:"
+    )
+    bot.register_next_step_handler(msg, broadcast_message)
+
+def broadcast_message(message):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        return
+    
+    # الحصول على جميع المستخدمين
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM users")
+    users = c.fetchall()
+    conn.close()
+    
+    total_users = len(users)
+    success = 0
+    failed = 0
+    
+    # إرسال الرسالة لكل مستخدم
+    for user in users:
+        try:
+            bot.send_message(user[0], message.text)
+            success += 1
+        except Exception as e:
+            logger.error(f"Error broadcasting to user {user[0]}: {e}")
+            failed += 1
+    
+    # إرسال التقرير
+    bot.reply_to(
+        message,
+        f"📤 تقرير إرسال الرسالة:\n"
+        f"• إجمالي المستخدمين: {total_users}\n"
+        f"• تم الإرسال بنجاح: {success}\n"
+        f"• فشل في الإرسال: {failed}"
+    )
 
 # تشغيل البوت
 if __name__ == '__main__':
