@@ -511,33 +511,36 @@ def share_bot_callback(call):
     user_data = initialize_user_data(user_id)
     
     # حساب التقدم والمتبقي للمستوى
-    progress_percent = min(100, int((user_data['progress'] / 1000) * 100) if user_data['progress'] > 0 else 0
+    progress_percent = min(100, int((user_data['progress'] / 1000) * 100)) if user_data['progress'] > 0 else 0
     
-    share_text = f"""
-قال رسول الله ﷺ:
-"من دعا إلى هدى كان له من الأجر مثل أجور من تبعه"
-
-📿 بوت نُور الذِّكْر:
-https://t.me/Ryukn_bot
-
-✨ مميزات البوت:
-• عدّاد الأذكار التلقائي
-• نظام المكافآت والمستويات
-• إحصائيات مفصلة
-• تذكيرات يومية
-
-🏆 مستواي الحالي: {user_data['level']}
-🔥 سلسلة أيامي: {user_data['daily_streak']} يوم
-
-🎯 تقدمي: {user_data['progress']}/1000 ({progress_percent}%)
-⏳ المتبقي للمستوى التالي: {user_data['next_level_remaining']} ذكر
-    """
+    # حل مشكلة السطر 516: استخدام طريقة أكثر أماناً لإنشاء النص
+    share_lines = [
+        "قال رسول الله ﷺ:",
+        "\"من دعا إلى هدى كان له من الأجر مثل أجور من تبعه\"",
+        "",
+        "📿 بوت نُور الذِّكْر:",
+        "https://t.me/Ryukn_bot",
+        "",
+        "✨ مميزات البوت:",
+        "• عدّاد الأذكار التلقائي",
+        "• نظام المكافآت والمستويات",
+        "• إحصائيات مفصلة",
+        "• تذكيرات يومية",
+        "",
+        f"🏆 مستواي الحالي: {user_data['level']}",
+        f"🔥 سلسلة أيامي: {user_data['daily_streak']} يوم",
+        "",
+        f"🎯 تقدمي: {user_data['progress']}/1000 ({progress_percent}%)",
+        f"⏳ المتبقي للمستوى التالي: {user_data['next_level_remaining']} ذكر"
+    ]
+    
+    share_text = "\n".join(share_lines)
     
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton(
             "📤 مشاركة البوت", 
-            url=f"https://t.me/share/url?url=https://t.me/Ryukn_bot&text={share_text}"
+            url=f"https://t.me/share/url?url=https://t.me/Ryukn_bot&text={requests.utils.quote(share_text)}"
         )
     )
     keyboard.add(
@@ -588,7 +591,6 @@ def show_stats_callback(call):
     user_data = initialize_user_data(user_id)
     
     # حساب التقدم للمستوى التالي
-    current_level_points = (user_data['level'] - 1) * 1000
     progress_percent = min(100, int((user_data['progress'] / 1000) * 100)) if user_data['progress'] > 0 else 0
     
     stats_message = f"""
