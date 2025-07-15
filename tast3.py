@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 
 # متغيرات البيئة
 CHANNEL_USERNAME = os.getenv('CHANNEL_USERNAME', '@Aymen_dj_max')
-CHANNEL_ID = int(os.getenv('CHANNEL_ID', '-1002807434205'))  # تحويل إلى عدد صحيح
+CHANNEL_ID = int(os.getenv('CHANNEL_ID', '-1002807434205'))
 DEVELOPER_USERNAME = os.getenv('DEVELOPER_USERNAME', '@Akio_co')
-BOT_TOKEN = os.getenv('BOT_TOKEN')  # التوكن من متغيرات البيئة فقط
-ADMIN_USER_ID = 8199450690  # إضافة معرف الأدمن
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+ADMIN_USER_ID = 8199450690  # تأكد من تطابق هذا الرقم مع حسابك
 
 # تهيئة البوت
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN, skip_pending=True)
 
 # تهيئة Flask
 app = Flask(__name__)
@@ -35,30 +35,40 @@ app = Flask(__name__)
 def ping():
     return Response("Bot is alive!", status=200, mimetype='text/plain')
 
+# قفل للتحكم في الوصول لقاعدة البيانات
+db_lock = threading.Lock()
+
 # تخزين بيانات المستخدمين في قاعدة البيانات
 def init_db():
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (user_id INTEGER PRIMARY KEY,
-                  subhan_count INTEGER DEFAULT 0,
-                  alhamdulillah_count INTEGER DEFAULT 0,
-                  la_ilaha_count INTEGER DEFAULT 0,
-                  allahu_akbar_count INTEGER DEFAULT 0,
-                  total_count INTEGER DEFAULT 0,
-                  daily_streak INTEGER DEFAULT 0,
-                  last_active TEXT,
-                  level INTEGER DEFAULT 1,
-                  notifications BOOLEAN DEFAULT 1,
-                  joined_date TEXT,
-                  progress INTEGER DEFAULT 0,
-                  next_level_remaining INTEGER DEFAULT 1000)''')
-    conn.commit()
-    conn.close()
+    with db_lock:
+        conn = sqlite3.connect('users.db', check_same_thread=False)
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS users
+                    (user_id INTEGER PRIMARY KEY,
+                     subhan_count INTEGER DEFAULT 0,
+                     alhamdulillah_count INTEGER DEFAULT 0,
+                     la_ilaha_count INTEGER DEFAULT 0,
+                     allahu_akbar_count INTEGER DEFAULT 0,
+                     total_count INTEGER DEFAULT 0,
+                     daily_streak INTEGER DEFAULT 0,
+                     last_active TEXT,
+                     level INTEGER DEFAULT 1,
+                     notifications BOOLEAN DEFAULT 1,
+                     joined_date TEXT,
+                     progress INTEGER DEFAULT 0,
+                     next_level_remaining INTEGER DEFAULT 1000,
+                     # حقول التراكم الجديدة
+                     subhan_cumulative INTEGER DEFAULT 0,
+                     alhamdulillah_cumulative INTEGER DEFAULT 0,
+                     la_ilaha_cumulative INTEGER DEFAULT 0,
+                     allahu_akbar_cumulative INTEGER DEFAULT 0,
+                     total_cumulative INTEGER DEFAULT 0)''')
+        conn.commit()
+        conn.close()
 
 init_db()
 
-# تخزين معرف الرسالة الرئيسية لكل مستخدم (في الذاكرة فقط)
+# تخزين معرف الرسالة الرئيسية لكل مستخدم
 user_messages = {}
 
 # هيكل بيانات المستخدم الافتراضي
@@ -73,78 +83,104 @@ default_user_data = {
     'level': 1,
     'notifications': True,
     'joined_date': None,
-    'progress': 0,  # إضافة التقدم
-    'next_level_remaining': 1000  # إضافة المتبقي للمستوى
+    'progress': 0,
+    'next_level_remaining': 1000,
+    # قيم التراكم
+    'subhan_cumulative': 0,
+    'alhamdulillah_cumulative': 0,
+    'la_ilaha_cumulative': 0,
+    'allahu_akbar_cumulative': 0,
+    'total_cumulative': 0
 }
 
 # حالة البوت (تشغيل/إيقاف)
 bot_enabled = True
 
 def get_user_data(user_id):
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-    user = c.fetchone()
-    conn.close()
-    
-    if user:
-        return {
-            'user_id': user[0],
-            'subhan_count': user[1],
-            'alhamdulillah_count': user[2],
-            'la_ilaha_count': user[3],
-            'allahu_akbar_count': user[4],
-            'total_count': user[5],
-            'daily_streak': user[6],
-            'last_active': user[7],
-            'level': user[8],
-            'notifications': bool(user[9]),
-            'joined_date': user[10],
-            'progress': user[11],  # إضافة التقدم
-            'next_level_remaining': user[12]  # إضافة المتبقي للمستوى
-        }
-    return None
+    with db_lock:
+        conn = sqlite3.connect('users.db', check_same_thread=False)
+        c = conn.cursor()
+        c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        user = c.fetchone()
+        conn.close()
+        
+        if user:
+            return {
+                'user_id': user[0],
+                'subhan_count': user[1],
+                'alhamdulillah_count': user[2],
+                'la_ilaha_count': user[3],
+                'allahu_akbar_count': user[4],
+                'total_count': user[5],
+                'daily_streak': user[6],
+                'last_active': user[7],
+                'level': user[8],
+                'notifications': bool(user[9]),
+                'joined_date': user[10],
+                'progress': user[11],
+                'next_level_remaining': user[12],
+                # حقول التراكم
+                'subhan_cumulative': user[13],
+                'alhamdulillah_cumulative': user[14],
+                'la_ilaha_cumulative': user[15],
+                'allahu_akbar_cumulative': user[16],
+                'total_cumulative': user[17]
+            }
+        return None
 
 def update_user_data(user_id, data):
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    
-    # تحويل القيم المنطقية إلى أعداد صحيحة
-    notifications_int = 1 if data['notifications'] else 0
-    
-    if get_user_data(user_id):
-        c.execute('''UPDATE users SET
-                    subhan_count = ?,
-                    alhamdulillah_count = ?,
-                    la_ilaha_count = ?,
-                    allahu_akbar_count = ?,
-                    total_count = ?,
-                    daily_streak = ?,
-                    last_active = ?,
-                    level = ?,
-                    notifications = ?,
-                    joined_date = ?,
-                    progress = ?,
-                    next_level_remaining = ?
-                    WHERE user_id = ?''',
-                  (data['subhan_count'], data['alhamdulillah_count'], data['la_ilaha_count'],
-                   data['allahu_akbar_count'], data['total_count'], data['daily_streak'],
-                   data['last_active'], data['level'], notifications_int,
-                   data['joined_date'], data['progress'], data['next_level_remaining'],
-                   user_id))
-    else:
-        c.execute('''INSERT INTO users 
-                    (user_id, subhan_count, alhamdulillah_count, la_ilaha_count, allahu_akbar_count,
-                     total_count, daily_streak, last_active, level, notifications, joined_date,
-                     progress, next_level_remaining)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (user_id, data['subhan_count'], data['alhamdulillah_count'], data['la_ilaha_count'],
-                   data['allahu_akbar_count'], data['total_count'], data['daily_streak'],
-                   data['last_active'], data['level'], notifications_int,
-                   data['joined_date'], data['progress'], data['next_level_remaining']))
-    
-    conn.commit()
-    conn.close()
+    with db_lock:
+        conn = sqlite3.connect('users.db', check_same_thread=False)
+        c = conn.cursor()
+        
+        notifications_int = 1 if data['notifications'] else 0
+        
+        if get_user_data(user_id):
+            c.execute('''UPDATE users SET
+                        subhan_count = ?,
+                        alhamdulillah_count = ?,
+                        la_ilaha_count = ?,
+                        allahu_akbar_count = ?,
+                        total_count = ?,
+                        daily_streak = ?,
+                        last_active = ?,
+                        level = ?,
+                        notifications = ?,
+                        joined_date = ?,
+                        progress = ?,
+                        next_level_remaining = ?,
+                        subhan_cumulative = ?,
+                        alhamdulillah_cumulative = ?,
+                        la_ilaha_cumulative = ?,
+                        allahu_akbar_cumulative = ?,
+                        total_cumulative = ?
+                        WHERE user_id = ?''',
+                    (data['subhan_count'], data['alhamdulillah_count'], data['la_ilaha_count'],
+                     data['allahu_akbar_count'], data['total_count'], data['daily_streak'],
+                     data['last_active'], data['level'], notifications_int,
+                     data['joined_date'], data['progress'], data['next_level_remaining'],
+                     data['subhan_cumulative'], data['alhamdulillah_cumulative'],
+                     data['la_ilaha_cumulative'], data['allahu_akbar_cumulative'],
+                     data['total_cumulative'],
+                     user_id))
+        else:
+            c.execute('''INSERT INTO users 
+                        (user_id, subhan_count, alhamdulillah_count, la_ilaha_count, allahu_akbar_count,
+                         total_count, daily_streak, last_active, level, notifications, joined_date,
+                         progress, next_level_remaining,
+                         subhan_cumulative, alhamdulillah_cumulative, la_ilaha_cumulative, 
+                         allahu_akbar_cumulative, total_cumulative)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (user_id, data['subhan_count'], data['alhamdulillah_count'], data['la_ilaha_count'],
+                     data['allahu_akbar_count'], data['total_count'], data['daily_streak'],
+                     data['last_active'], data['level'], notifications_int,
+                     data['joined_date'], data['progress'], data['next_level_remaining'],
+                     data['subhan_cumulative'], data['alhamdulillah_cumulative'],
+                     data['la_ilaha_cumulative'], data['allahu_akbar_cumulative'],
+                     data['total_cumulative']))
+        
+        conn.commit()
+        conn.close()
 
 def initialize_user_data(user_id):
     user = get_user_data(user_id)
@@ -348,10 +384,12 @@ def check_daily_rewards(user_id):
         if streak > 0 and streak % 7 == 0:  # مكافأة أسبوعية
             bonus = 100
             user_data['total_count'] += bonus
+            user_data['total_cumulative'] += bonus
             reward_msg = f"مكافأة أسبوعية! {bonus} نقطة إضافية لاستمرارك {streak} يوم"
         elif streak > 0 and streak % 3 == 0:  # مكافأة كل 3 أيام
             bonus = 50
             user_data['total_count'] += bonus
+            user_data['total_cumulative'] += bonus
             reward_msg = f"مكافأة استمرار! {bonus} نقطة إضافية لاستمرارك {streak} يوم"
         
         # تحديث البيانات
@@ -378,23 +416,27 @@ def handle_dhikr_callback(call):
     
     user_data = initialize_user_data(user_id)
     
-    dhikr_type = call.data.split('_')[1]
+    dhikr_type = call.data.split('_', 1)[1]  # التعديل الهام هنا
     
     dhikr_responses = {
         'subhan': {
             'key': 'subhan_count',
+            'cum_key': 'subhan_cumulative',
             'response': "سبحان الله وبحمده، سبحان الله العظيم 🌟"
         },
         'alhamdulillah': {
             'key': 'alhamdulillah_count',
+            'cum_key': 'alhamdulillah_cumulative',
             'response': "الحمد لله رب العالمين 🤲"
         },
         'la_ilaha': {
             'key': 'la_ilaha_count',
+            'cum_key': 'la_ilaha_cumulative',
             'response': "لا إله إلا الله وحده لا شريك له 🕌"
         },
         'allahu_akbar': {
             'key': 'allahu_akbar_count',
+            'cum_key': 'allahu_akbar_cumulative',
             'response': "الله اكبر كبيراً والحمد لله كثيراً 🌙"
         }
     }
@@ -404,7 +446,9 @@ def handle_dhikr_callback(call):
         
         # تحديث العداد
         user_data[info['key']] += 1
+        user_data[info['cum_key']] += 1  # التراكم
         user_data['total_count'] += 1
+        user_data['total_cumulative'] += 1  # التراكم الكلي
         
         # تحديث البيانات في قاعدة البيانات
         update_user_data(user_id, user_data)
@@ -479,7 +523,7 @@ def reset_counters_callback(call):
     progress = user_data['progress']
     next_level_remaining = user_data['next_level_remaining']
     
-    # إعادة تعيين العدادات فقط
+    # إعادة تعيين العدادات فقط (مع الحفاظ على التراكم)
     user_data['subhan_count'] = 0
     user_data['alhamdulillah_count'] = 0
     user_data['la_ilaha_count'] = 0
@@ -596,20 +640,27 @@ def show_stats_callback(call):
     stats_message = f"""
 📊 إحصائياتك الشخصية:
 
-🔢 عدد الأذكار:
+🔢 عدد الأذكار (التراكمي):
+• سبحان الله: {user_data['subhan_cumulative']} مرة
+• الحمد لله: {user_data['alhamdulillah_cumulative']} مرة
+• لا إله إلا الله: {user_data['la_ilaha_cumulative']} مرة
+• الله اكبر: {user_data['allahu_akbar_cumulative']} مرة
+
+🔢 عدد الأذكار (الحالي):
 • سبحان الله: {user_data['subhan_count']} مرة
 • الحمد لله: {user_data['alhamdulillah_count']} مرة
 • لا إله إلا الله: {user_data['la_ilaha_count']} مرة
 • الله اكبر: {user_data['allahu_akbar_count']} مرة
 
-📈 الإجمالي: {user_data['total_count']} ذكر
+📈 الإجمالي: {user_data['total_cumulative']} ذكر (تراكمي)
+📈 الإجمالي الحالي: {user_data['total_count']} ذكر
 🏆 المستوى: {user_data['level']}
 📅 سلسلة الأيام: {user_data['daily_streak']} يوم
 
 🎯 التقدم: {user_data['progress']}/1000 ({progress_percent}%)
 ⏳ المتبقي للمستوى التالي: {user_data['next_level_remaining']} ذكر
 
-💎 الحسنات المكتسبة: {user_data['total_count'] * 10} حسنة بإذن الله
+💎 الحسنات المكتسبة: {user_data['total_cumulative'] * 10} حسنة بإذن الله
     """
     
     keyboard = types.InlineKeyboardMarkup()
@@ -667,13 +718,20 @@ def export_data_callback(call):
     export_text = f"""
 📋 بيانات الأذكار الخاصة بك:
 
-📿 عدد الأذكار:
+📿 عدد الأذكار (التراكمي):
+سبحان الله: {user_data['subhan_cumulative']}
+الحمد لله: {user_data['alhamdulillah_cumulative']}
+لا إله إلا الله: {user_data['la_ilaha_cumulative']}
+الله اكبر: {user_data['allahu_akbar_cumulative']}
+
+📿 عدد الأذكار (الحالي):
 سبحان الله: {user_data['subhan_count']}
 الحمد لله: {user_data['alhamdulillah_count']}
 لا إله إلا الله: {user_data['la_ilaha_count']}
 الله اكبر: {user_data['allahu_akbar_count']}
 
-📊 الإجمالي: {user_data['total_count']}
+📊 الإجمالي: {user_data['total_cumulative']} (تراكمي)
+📊 الإجمالي الحالي: {user_data['total_count']}
 🏆 المستوى: {user_data['level']}
 🔥 سلسلة الأيام: {user_data['daily_streak']}
 📅 تاريخ الانضمام: {user_data['joined_date']}
@@ -682,7 +740,7 @@ def export_data_callback(call):
 🎯 التقدم: {user_data['progress']}/1000
 ⏳ المتبقي للمستوى التالي: {user_data['next_level_remaining']} ذكر
 
-💎 الحسنات المكتسبة: {user_data['total_count'] * 10}
+💎 الحسنات المكتسبة: {user_data['total_cumulative'] * 10}
     """
     
     keyboard = types.InlineKeyboardMarkup()
@@ -763,25 +821,26 @@ def handle_text_messages(message):
 def send_daily_reminders():
     """إرسال تذكيرات يومية للمستخدمين"""
     try:
-        conn = sqlite3.connect('users.db')
-        c = conn.cursor()
-        c.execute("SELECT user_id FROM users WHERE notifications = 1")
-        users = c.fetchall()
-        conn.close()
-        
-        current_hour = datetime.now().hour
-        greeting = "🌅 صباح الخير!" if current_hour < 12 else "🌇 مساء الخير!"
-        message_text = "📿 لا تنس أذكار الصباح" if current_hour < 12 else "📿 لا تنس أذكار المساء"
-        
-        for user in users:
-            user_id = user[0]
-            try:
-                bot.send_message(
-                    user_id,
-                    f"{greeting}\n{message_text}\n🎯 ابدأ يومك بالذكر والتسبيح"
-                )
-            except Exception as e:
-                logger.error(f"Error sending reminder to user {user_id}: {e}")
+        with db_lock:
+            conn = sqlite3.connect('users.db', check_same_thread=False)
+            c = conn.cursor()
+            c.execute("SELECT user_id FROM users WHERE notifications = 1")
+            users = c.fetchall()
+            conn.close()
+            
+            current_hour = datetime.now().hour
+            greeting = "🌅 صباح الخير!" if current_hour < 12 else "🌇 مساء الخير!"
+            message_text = "📿 لا تنس أذكار الصباح" if current_hour < 12 else "📿 لا تنس أذكار المساء"
+            
+            for user in users:
+                user_id = user[0]
+                try:
+                    bot.send_message(
+                        user_id,
+                        f"{greeting}\n{message_text}\n🎯 ابدأ يومك بالذكر والتسبيح"
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending reminder to user {user_id}: {e}")
     except Exception as e:
         logger.error(f"Error in daily reminders: {e}")
 
@@ -929,11 +988,12 @@ def broadcast_message(message):
         return
     
     # الحصول على جميع المستخدمين
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute("SELECT user_id FROM users")
-    users = c.fetchall()
-    conn.close()
+    with db_lock:
+        conn = sqlite3.connect('users.db', check_same_thread=False)
+        c = conn.cursor()
+        c.execute("SELECT user_id FROM users")
+        users = c.fetchall()
+        conn.close()
     
     total_users = len(users)
     success = 0
