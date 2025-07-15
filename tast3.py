@@ -5,10 +5,10 @@ from telebot import types
 from datetime import datetime, timedelta
 import threading
 import time
-import sqlite3
 import schedule
 import requests
 from flask import Flask, Response
+import pickle
 import io
 
 # تكوين السجلات
@@ -35,41 +35,10 @@ app = Flask(__name__)
 def ping():
     return Response("Bot is alive!", status=200, mimetype='text/plain')
 
-# قفل للتحكم في الوصول لقاعدة البيانات
-db_lock = threading.Lock()
-
-# تخزين بيانات المستخدمين في قاعدة البيانات
-def init_db():
-    with db_lock:
-        conn = sqlite3.connect('users.db', check_same_thread=False)
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS users
-                    (user_id INTEGER PRIMARY KEY,
-                     subhan_count INTEGER DEFAULT 0,
-                     alhamdulillah_count INTEGER DEFAULT 0,
-                     la_ilaha_count INTEGER DEFAULT 0,
-                     allahu_akbar_count INTEGER DEFAULT 0,
-                     total_count INTEGER DEFAULT 0,
-                     daily_streak INTEGER DEFAULT 0,
-                     last_active TEXT,
-                     level INTEGER DEFAULT 1,
-                     notifications BOOLEAN DEFAULT 1,
-                     joined_date TEXT,
-                     progress INTEGER DEFAULT 0,
-                     next_level_remaining INTEGER DEFAULT 1000,
-                     # حقول التراكم الجديدة
-                     subhan_cumulative INTEGER DEFAULT 0,
-                     alhamdulillah_cumulative INTEGER DEFAULT 0,
-                     la_ilaha_cumulative INTEGER DEFAULT 0,
-                     allahu_akbar_cumulative INTEGER DEFAULT 0,
-                     total_cumulative INTEGER DEFAULT 0)''')
-        conn.commit()
-        conn.close()
-
-init_db()
-
-# تخزين معرف الرسالة الرئيسية لكل مستخدم
+# تخزين البيانات في الذاكرة
+users_data = {}
 user_messages = {}
+data_lock = threading.Lock()
 
 # هيكل بيانات المستخدم الافتراضي
 default_user_data = {
@@ -82,7 +51,7 @@ default_user_data = {
     'last_active': None,
     'level': 1,
     'notifications': True,
-    'joined_date': None,
+    'joined_date': datetime.now().strftime('%Y-%m-%d'),
     'progress': 0,
     'next_level_remaining': 1000,
     # قيم التراكم
@@ -97,100 +66,25 @@ default_user_data = {
 bot_enabled = True
 
 def get_user_data(user_id):
-    with db_lock:
-        conn = sqlite3.connect('users.db', check_same_thread=False)
-        c = conn.cursor()
-        c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-        user = c.fetchone()
-        conn.close()
-        
-        if user:
-            return {
-                'user_id': user[0],
-                'subhan_count': user[1],
-                'alhamdulillah_count': user[2],
-                'la_ilaha_count': user[3],
-                'allahu_akbar_count': user[4],
-                'total_count': user[5],
-                'daily_streak': user[6],
-                'last_active': user[7],
-                'level': user[8],
-                'notifications': bool(user[9]),
-                'joined_date': user[10],
-                'progress': user[11],
-                'next_level_remaining': user[12],
-                # حقول التراكم
-                'subhan_cumulative': user[13],
-                'alhamdulillah_cumulative': user[14],
-                'la_ilaha_cumulative': user[15],
-                'allahu_akbar_cumulative': user[16],
-                'total_cumulative': user[17]
-            }
-        return None
+    with data_lock:
+        # إرجاع نسخة من البيانات لمنع التعديل المباشر
+        return users_data.get(user_id, {}).copy()
 
 def update_user_data(user_id, data):
-    with db_lock:
-        conn = sqlite3.connect('users.db', check_same_thread=False)
-        c = conn.cursor()
-        
-        notifications_int = 1 if data['notifications'] else 0
-        
-        if get_user_data(user_id):
-            c.execute('''UPDATE users SET
-                        subhan_count = ?,
-                        alhamdulillah_count = ?,
-                        la_ilaha_count = ?,
-                        allahu_akbar_count = ?,
-                        total_count = ?,
-                        daily_streak = ?,
-                        last_active = ?,
-                        level = ?,
-                        notifications = ?,
-                        joined_date = ?,
-                        progress = ?,
-                        next_level_remaining = ?,
-                        subhan_cumulative = ?,
-                        alhamdulillah_cumulative = ?,
-                        la_ilaha_cumulative = ?,
-                        allahu_akbar_cumulative = ?,
-                        total_cumulative = ?
-                        WHERE user_id = ?''',
-                    (data['subhan_count'], data['alhamdulillah_count'], data['la_ilaha_count'],
-                     data['allahu_akbar_count'], data['total_count'], data['daily_streak'],
-                     data['last_active'], data['level'], notifications_int,
-                     data['joined_date'], data['progress'], data['next_level_remaining'],
-                     data['subhan_cumulative'], data['alhamdulillah_cumulative'],
-                     data['la_ilaha_cumulative'], data['allahu_akbar_cumulative'],
-                     data['total_cumulative'],
-                     user_id))
-        else:
-            c.execute('''INSERT INTO users 
-                        (user_id, subhan_count, alhamdulillah_count, la_ilaha_count, allahu_akbar_count,
-                         total_count, daily_streak, last_active, level, notifications, joined_date,
-                         progress, next_level_remaining,
-                         subhan_cumulative, alhamdulillah_cumulative, la_ilaha_cumulative, 
-                         allahu_akbar_cumulative, total_cumulative)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (user_id, data['subhan_count'], data['alhamdulillah_count'], data['la_ilaha_count'],
-                     data['allahu_akbar_count'], data['total_count'], data['daily_streak'],
-                     data['last_active'], data['level'], notifications_int,
-                     data['joined_date'], data['progress'], data['next_level_remaining'],
-                     data['subhan_cumulative'], data['alhamdulillah_cumulative'],
-                     data['la_ilaha_cumulative'], data['allahu_akbar_cumulative'],
-                     data['total_cumulative']))
-        
-        conn.commit()
-        conn.close()
+    with data_lock:
+        # تحديث البيانات مع الحفاظ على القيم الافتراضية إذا لزم الأمر
+        if user_id not in users_data:
+            users_data[user_id] = default_user_data.copy()
+        users_data[user_id].update(data)
 
 def initialize_user_data(user_id):
-    user = get_user_data(user_id)
-    if not user:
-        new_data = default_user_data.copy()
-        new_data['last_active'] = datetime.now().strftime('%Y-%m-%d')
-        new_data['joined_date'] = datetime.now().strftime('%Y-%m-%d')
-        update_user_data(user_id, new_data)
-        return new_data
-    return user
+    with data_lock:
+        if user_id not in users_data:
+            new_data = default_user_data.copy()
+            new_data['last_active'] = datetime.now().strftime('%Y-%m-%d')
+            new_data['joined_date'] = datetime.now().strftime('%Y-%m-%d')
+            users_data[user_id] = new_data
+        return users_data[user_id].copy()
 
 def is_user_subscribed(user_id):
     """التحقق من اشتراك المستخدم في القناة"""
@@ -203,7 +97,7 @@ def is_user_subscribed(user_id):
 
 def get_main_keyboard(user_id):
     """إنشاء لوحة المفاتيح الرئيسية للأذكار"""
-    user_data = get_user_data(user_id) or initialize_user_data(user_id)
+    user_data = initialize_user_data(user_id)
     
     keyboard = types.InlineKeyboardMarkup(row_width=2)
     
@@ -235,7 +129,7 @@ def get_main_keyboard(user_id):
 
 def get_main_message(user_id):
     """إنشاء نص الرسالة الرئيسية"""
-    user_data = get_user_data(user_id) or initialize_user_data(user_id)
+    user_data = initialize_user_data(user_id)
     
     # التحقق من المكافآت اليومية
     reward_msg = check_daily_rewards(user_id)
@@ -366,7 +260,7 @@ def check_daily_rewards(user_id):
         
         if not user_data or not user_data['last_active']:
             return None
-            
+        
         last_active = datetime.strptime(user_data['last_active'], '%Y-%m-%d').date()
         
         days_diff = (today - last_active).days
@@ -450,7 +344,7 @@ def handle_dhikr_callback(call):
         user_data['total_count'] += 1
         user_data['total_cumulative'] += 1  # التراكم الكلي
         
-        # تحديث البيانات في قاعدة البيانات
+        # تحديث البيانات في الذاكرة
         update_user_data(user_id, user_data)
         
         # تحديث المستوى
@@ -557,7 +451,6 @@ def share_bot_callback(call):
     # حساب التقدم والمتبقي للمستوى
     progress_percent = min(100, int((user_data['progress'] / 1000) * 100)) if user_data['progress'] > 0 else 0
     
-    # حل مشكلة السطر 516: استخدام طريقة أكثر أماناً لإنشاء النص
     share_lines = [
         "قال رسول الله ﷺ:",
         "\"من دعا إلى هدى كان له من الأجر مثل أجور من تبعه\"",
@@ -606,7 +499,6 @@ def developer_info_callback(call):
         bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً")
         return
     
-    # إصلاح رابط المطور
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton("💬 مراسلة المطور", url=f"https://t.me/Akio_co")
@@ -759,7 +651,7 @@ def export_data_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'toggle_notifications')
 def toggle_notifications_callback(call):
     user_id = call.from_user.id
-    user_data = initialize_user_data(user_id)
+    user_data = get_user_data(user_id)
     
     user_data['notifications'] = not user_data['notifications']
     update_user_data(user_id, user_data)
@@ -821,19 +713,15 @@ def handle_text_messages(message):
 def send_daily_reminders():
     """إرسال تذكيرات يومية للمستخدمين"""
     try:
-        with db_lock:
-            conn = sqlite3.connect('users.db', check_same_thread=False)
-            c = conn.cursor()
-            c.execute("SELECT user_id FROM users WHERE notifications = 1")
-            users = c.fetchall()
-            conn.close()
+        with data_lock:
+            users = [user_id for user_id, data in users_data.items() 
+                    if data.get('notifications', True)]
             
             current_hour = datetime.now().hour
             greeting = "🌅 صباح الخير!" if current_hour < 12 else "🌇 مساء الخير!"
             message_text = "📿 لا تنس أذكار الصباح" if current_hour < 12 else "📿 لا تنس أذكار المساء"
             
-            for user in users:
-                user_id = user[0]
+            for user_id in users:
                 try:
                     bot.send_message(
                         user_id,
@@ -876,10 +764,9 @@ def admin_panel(message):
     keyboard = types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         types.InlineKeyboardButton(f"{'⏸️ إيقاف البوت' if bot_enabled else '▶️ تشغيل البوت'}", callback_data="toggle_bot"),
-        types.InlineKeyboardButton("📤 استيراد البيانات", callback_data="import_data")
+        types.InlineKeyboardButton("📥 تصدير البيانات", callback_data="export_all_data")
     )
     keyboard.add(
-        types.InlineKeyboardButton("📥 تصدير البيانات", callback_data="export_all_data"),
         types.InlineKeyboardButton("📨 إنشاء رسالة", callback_data="create_message")
     )
     
@@ -914,58 +801,26 @@ def export_all_data(call):
         return
     
     try:
-        # إرسال ملف قاعدة البيانات
-        with open('users.db', 'rb') as db_file:
+        # تحويل البيانات إلى نص قابل للقراءة
+        data_text = "بيانات جميع المستخدمين:\n\n"
+        for user_id, user_data in users_data.items():
+            data_text += f"المستخدم: {user_id}\n"
+            for key, value in user_data.items():
+                data_text += f"{key}: {value}\n"
+            data_text += "\n"
+        
+        # إرسال البيانات كملف نصي
+        with io.BytesIO(data_text.encode('utf-8')) as data_file:
+            data_file.name = 'users_data.txt'
             bot.send_document(
                 call.message.chat.id,
-                db_file,
-                caption="📦 ملف قاعدة البيانات لجميع المستخدمين"
+                data_file,
+                caption="📦 بيانات جميع المستخدمين"
             )
         bot.answer_callback_query(call.id, "✅ تم تصدير البيانات بنجاح")
     except Exception as e:
         logger.error(f"Error exporting data: {e}")
         bot.answer_callback_query(call.id, "❌ فشل في تصدير البيانات")
-
-@bot.callback_query_handler(func=lambda call: call.data == 'import_data')
-def import_data(call):
-    user_id = call.from_user.id
-    
-    if not is_admin(user_id):
-        bot.answer_callback_query(call.id, "⛔ غير مسموح لك بهذا الإجراء")
-        return
-    
-    msg = bot.send_message(
-        call.message.chat.id,
-        "📤 أرسل ملف قاعدة البيانات الآن (يجب أن يكون باسم users.db)"
-    )
-    bot.register_next_step_handler(msg, process_import_file)
-
-def process_import_file(message):
-    user_id = message.from_user.id
-    
-    if not is_admin(user_id):
-        return
-    
-    if not message.document:
-        bot.reply_to(message, "❌ لم يتم إرسال ملف، يرجى المحاولة مرة أخرى")
-        return
-    
-    try:
-        # تحميل الملف
-        file_info = bot.get_file(message.document.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        
-        # حفظ الملف
-        with open('users.db', 'wb') as new_file:
-            new_file.write(downloaded_file)
-        
-        # إعادة تحميل قاعدة البيانات
-        init_db()
-        
-        bot.reply_to(message, "✅ تم استيراد البيانات بنجاح")
-    except Exception as e:
-        logger.error(f"Error importing data: {e}")
-        bot.reply_to(message, "❌ فشل في استيراد البيانات")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'create_message')
 def create_message(call):
@@ -988,24 +843,20 @@ def broadcast_message(message):
         return
     
     # الحصول على جميع المستخدمين
-    with db_lock:
-        conn = sqlite3.connect('users.db', check_same_thread=False)
-        c = conn.cursor()
-        c.execute("SELECT user_id FROM users")
-        users = c.fetchall()
-        conn.close()
+    with data_lock:
+        users = list(users_data.keys())
     
     total_users = len(users)
     success = 0
     failed = 0
     
     # إرسال الرسالة لكل مستخدم
-    for user in users:
+    for user_id in users:
         try:
-            bot.send_message(user[0], message.text)
+            bot.send_message(user_id, message.text)
             success += 1
         except Exception as e:
-            logger.error(f"Error broadcasting to user {user[0]}: {e}")
+            logger.error(f"Error broadcasting to user {user_id}: {e}")
             failed += 1
     
     # إرسال التقرير
