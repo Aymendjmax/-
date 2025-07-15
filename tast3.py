@@ -51,8 +51,8 @@ def init_db():
                   level INTEGER DEFAULT 1,
                   notifications BOOLEAN DEFAULT 1,
                   joined_date TEXT,
-                  progress INTEGER DEFAULT 0,  # إضافة حقل التقدم
-                  next_level_remaining INTEGER DEFAULT 1000)''')  # إضافة حقل المتبقي للمستوى
+                  progress INTEGER DEFAULT 0,
+                  next_level_remaining INTEGER DEFAULT 1000)''')
     conn.commit()
     conn.close()
 
