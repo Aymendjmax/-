@@ -2,8 +2,10 @@ import os
 import logging
 import telebot
 from telebot import types
+from datetime import datetime
 import threading
 import time
+from flask import Flask, Response
 
 # تكوين السجلات
 logging.basicConfig(
@@ -19,6 +21,13 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 # تهيئة البوت
 bot = telebot.TeleBot(BOT_TOKEN, skip_pending=True)
+
+# تهيئة Flask
+app = Flask(__name__)
+
+@app.route('/ping')
+def ping():
+    return Response("Bot is alive!", status=200, mimetype='text/plain')
 
 # تخزين البيانات في الذاكرة
 users_data = {}
@@ -403,10 +412,20 @@ def handle_text_messages(message):
         # حذف الرسالة المؤقتة بعد 3 ثوانٍ
         threading.Timer(3.0, lambda: bot.delete_message(message.chat.id, temp_msg.message_id)).start()
 
+def run_flask_app():
+    """تشغيل خادم Flask"""
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+
 # تشغيل البوت
 if __name__ == '__main__':
     try:
         logger.info("Starting bot...")
+        
+        # بدء خيط خادم الويب
+        web_thread = threading.Thread(target=run_flask_app, daemon=True)
+        web_thread.start()
+        
+        # تشغيل البوت
         bot.infinity_polling(none_stop=True, timeout=30)
     except Exception as e:
         logger.error(f"Bot stopped: {e}")
