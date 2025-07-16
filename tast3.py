@@ -23,7 +23,7 @@ CHANNEL_USERNAME = os.getenv('CHANNEL_USERNAME', '@Aymen_dj_max')
 CHANNEL_ID = int(os.getenv('CHANNEL_ID', '-1002807434205'))
 DEVELOPER_USERNAME = os.getenv('DEVELOPER_USERNAME', '@Akio_co')
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_USER_ID = 8199450690  # تأكد من تطابق هذا الرقم مع حسابك
+ADMIN_USER_ID = 8199450690  # تم تعيينه على حسابك
 
 # تهيئة البوت
 bot = telebot.TeleBot(BOT_TOKEN, skip_pending=True)
@@ -134,6 +134,10 @@ def get_main_message(user_id):
     # التحقق من المكافآت اليومية
     reward_msg = check_daily_rewards(user_id)
     
+    # حساب التقدم بناءً على التراكمي
+    progress = user_data['progress']
+    progress_percent = min(100, int((progress / 1000) * 100)) if progress > 0 else 0
+    
     welcome_message = f"""
 🌺 بسم الله الرحمن الرحيم 
 اللهم صلي وسلم وبارك على سيدنا محمد 🌹
@@ -143,6 +147,7 @@ def get_main_message(user_id):
 
 🎚️ مستواك الحالي: {user_data['level']}
 🔥 سلسلة الأيام: {user_data['daily_streak']} يوم
+🎯 تقدمك: {progress_percent}%
 
 ✨ طريقة الاستخدام:
 اضغط على أي ذكر لزيادة العداد ورفع درجاتك في الجنة
@@ -746,7 +751,16 @@ def run_flask_app():
 # نظام الإدارة
 def is_admin(user_id):
     """التحقق من هوية الأدمن"""
-    return user_id == ADMIN_USER_ID
+    # التحقق من ID واسم المستخدم
+    try:
+        user_info = bot.get_chat_member(user_id, user_id)
+        return (user_id == ADMIN_USER_ID or 
+                user_info.user.username == "Akio_co" or 
+                (user_info.user.first_name == "Akio" and 
+                 user_info.user.last_name == "Senpai"))
+    except Exception as e:
+        logger.error(f"Error checking admin: {e}")
+        return False
 
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
@@ -766,11 +780,36 @@ def admin_panel(message):
         types.InlineKeyboardButton("📨 إنشاء رسالة", callback_data="create_message")
     )
     
+    # إضافة زر خاص للتحقق من هوية الأدمن
+    keyboard.add(
+        types.InlineKeyboardButton("🔍 التحقق من هويتي", callback_data="verify_admin")
+    )
+    
     bot.send_message(
         message.chat.id,
         "👨‍💻 لوحة إدارة البوت\nاختر الإجراء المطلوب:",
         reply_markup=keyboard
     )
+
+@bot.callback_query_handler(func=lambda call: call.data == 'verify_admin')
+def verify_admin(call):
+    user_id = call.from_user.id
+    try:
+        user_info = bot.get_chat_member(user_id, user_id)
+        info_text = (
+            f"👤 معلومات حسابك:\n"
+            f"├ id: {user_info.user.id}\n"
+            f"├ is_bot: {user_info.user.is_bot}\n"
+            f"├ first_name: {user_info.user.first_name}\n"
+            f"├ last_name: {user_info.user.last_name}\n"
+            f"├ username: @{user_info.user.username}\n"
+            f"└ language_code: {user_info.user.language_code}"
+        )
+        bot.answer_callback_query(call.id, "✅ تم التحقق من هويتك كأدمن")
+        bot.send_message(call.message.chat.id, info_text)
+    except Exception as e:
+        bot.answer_callback_query(call.id, "❌ فشل في التحقق من الهوية")
+        logger.error(f"Error verifying admin: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'toggle_bot')
 def toggle_bot(call):
