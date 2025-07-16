@@ -388,7 +388,7 @@ def share_bot_callback(call):
         reply_markup=keyboard
     )
 
-# الإصلاح هنا: تم تعديل دالة زر المطور فقط
+# الإصلاح النهائي لزر المطور
 @bot.callback_query_handler(func=lambda call: call.data == 'developer_info')
 def developer_info_callback(call):
     try:
@@ -409,16 +409,20 @@ def developer_info_callback(call):
             types.InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
         )
         
-        # تحرير الرسالة الحالية
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text="👨‍💻 *معلومات المطور:*\n\n"
+        # نص بسيط بدون تنسيق قد يسبب مشاكل
+        developer_text = (
+            "👨‍💻 معلومات المطور:\n\n"
             "• الاسم: @Akio_co\n"
             "• المهمة: تطوير وتحديث البوت\n\n"
             "🔧 لأي استفسار، اقتراح، أو مشكلة تقنية\n"
-            "📞 تواصل معنا في أي وقت",
-            parse_mode="Markdown",
+            "📞 تواصل معنا في أي وقت"
+        )
+        
+        # تحرير الرسالة الحالية بدون parse_mode
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=developer_text,
             reply_markup=keyboard
         )
         
