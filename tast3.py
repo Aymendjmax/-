@@ -212,7 +212,10 @@ def update_main_menu(user_id, chat_id):
             )
         else:
             # إعادة إنشاء القائمة إذا تم حذف الرسالة
-            show_main_menu(types.Message(message_id=0, chat=types.Chat(id=chat_id), from_user=types.User(id=user_id))
+            main_message = get_main_message(user_id)
+            keyboard = get_main_keyboard(user_id)
+            sent_message = bot.send_message(chat_id, main_message, parse_mode="Markdown", reply_markup=keyboard)
+            user_messages[user_id] = sent_message.message_id
     except Exception as e:
         logger.error(f"Error updating main menu: {e}")
 
@@ -441,20 +444,23 @@ def handle_text_messages(message):
     # حذف الرسالة النصية من المستخدم لتجنب التكديس
     try:
         bot.delete_message(message.chat.id, message.message_id)
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Error deleting message: {e}")
     
     # إذا لم تكن هناك رسالة رئيسية، إنشاء واحدة جديدة
     if user_id not in user_messages:
         show_main_menu(message)
     else:
         # إرسال رسالة تنبيه مؤقتة
-        temp_msg = bot.send_message(
-            message.chat.id,
-            "❓ استخدم الأزرار أدناه للتنقل في البوت"
-        )
-        # حذف الرسالة المؤقتة بعد 3 ثوانٍ
-        threading.Timer(3.0, lambda: bot.delete_message(message.chat.id, temp_msg.message_id)).start()
+        try:
+            temp_msg = bot.send_message(
+                message.chat.id,
+                "❓ استخدم الأزرار أدناه للتنقل في البوت"
+            )
+            # حذف الرسالة المؤقتة بعد 3 ثوانٍ
+            threading.Timer(3.0, lambda: bot.delete_message(message.chat.id, temp_msg.message_id)).start()
+        except Exception as e:
+            logger.error(f"Error sending temporary message: {e}")
 
 def run_flask_app():
     """تشغيل خادم Flask"""
