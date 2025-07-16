@@ -388,33 +388,43 @@ def share_bot_callback(call):
         reply_markup=keyboard
     )
 
+# الإصلاح هنا: تم تعديل دالة زر المطور فقط
 @bot.callback_query_handler(func=lambda call: call.data == 'developer_info')
 def developer_info_callback(call):
-    user_id = call.from_user.id
-    
-    if not is_user_subscribed(user_id):
-        bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً")
-        return
-    
-    keyboard = types.InlineKeyboardMarkup()
-    keyboard.add(
-        types.InlineKeyboardButton("💬 مراسلة المطور", url=f"https://t.me/Akio_co")
-    )
-    keyboard.add(
-        types.InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
-    )
-    
-    bot.edit_message_text(
-        "👨‍💻 *معلومات المطور:*\n\n"
-        "• الاسم: @Akio_co\n"
-        "• المهمة: تطوير وتحديث البوت\n\n"
-        "🔧 لأي استفسار، اقتراح، أو مشكلة تقنية\n"
-        "📞 تواصل معنا في أي وقت",
-        call.message.chat.id,
-        call.message.message_id,
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
+    try:
+        user_id = call.from_user.id
+        
+        # إشعار المستخدم بأن العملية جارية
+        bot.answer_callback_query(call.id, "جاري فتح معلومات المطور...", show_alert=False)
+        
+        if not is_user_subscribed(user_id):
+            bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً", show_alert=True)
+            return
+        
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(
+            types.InlineKeyboardButton("💬 مراسلة المطور", url="https://t.me/Akio_co")
+        )
+        keyboard.add(
+            types.InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
+        )
+        
+        # تحرير الرسالة الحالية
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text="👨‍💻 *معلومات المطور:*\n\n"
+            "• الاسم: @Akio_co\n"
+            "• المهمة: تطوير وتحديث البوت\n\n"
+            "🔧 لأي استفسار، اقتراح، أو مشكلة تقنية\n"
+            "📞 تواصل معنا في أي وقت",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        
+    except Exception as e:
+        logger.error(f"حدث خطأ في زر المطور: {e}")
+        bot.answer_callback_query(call.id, "❌ حدث خطأ، يرجى المحاولة لاحقاً", show_alert=True)
 
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_main')
 def back_to_main_callback(call):
