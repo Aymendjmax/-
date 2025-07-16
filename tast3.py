@@ -8,7 +8,7 @@ import time
 import schedule
 import requests
 from flask import Flask, Response
-import pickle
+import json
 import io
 
 # تكوين السجلات
@@ -363,13 +363,13 @@ def handle_dhikr_callback(call):
         update_main_menu(user_id, call.message.chat.id)
 
 def update_user_level(user_id):
-    """تحديث مستوى المستخدم"""
+    """تحديث مستوى المستخدم بناءً على التراكمي"""
     try:
         user_data = get_user_data(user_id)
         if not user_data:
             return None
             
-        total = user_data['total_count']
+        total = user_data['total_cumulative']  # التراكمي
         current_level = user_data['level']
         
         # ترقية المستوى كل 1000 ذكر
@@ -392,12 +392,12 @@ def show_total(call):
     user_id = call.from_user.id
     user_data = initialize_user_data(user_id)
     
-    total = user_data['total_count']
+    total = user_data['total_cumulative']  # إظهار التراكمي
     hasanat = total * 10
     
     bot.answer_callback_query(
         call.id,
-        f"📊 مجموع أذكارك: {total}\n💎 الحسنات: {hasanat} بإذن الله",
+        f"📊 مجموع أذكارك التراكمي: {total}\n💎 الحسنات: {hasanat} بإذن الله",
         show_alert=True
     )
 
@@ -411,24 +411,12 @@ def reset_counters_callback(call):
     
     user_data = initialize_user_data(user_id)
     
-    # الحفاظ على المستوى والستريك والتقدم والمتبقي
-    current_level = user_data['level']
-    current_streak = user_data['daily_streak']
-    progress = user_data['progress']
-    next_level_remaining = user_data['next_level_remaining']
-    
     # إعادة تعيين العدادات فقط (مع الحفاظ على التراكم)
     user_data['subhan_count'] = 0
     user_data['alhamdulillah_count'] = 0
     user_data['la_ilaha_count'] = 0
     user_data['allahu_akbar_count'] = 0
     user_data['total_count'] = 0
-    
-    # استعادة البيانات المحفوظة
-    user_data['level'] = current_level
-    user_data['daily_streak'] = current_streak
-    user_data['progress'] = progress
-    user_data['next_level_remaining'] = next_level_remaining
     
     # تحديث البيانات
     update_user_data(user_id, user_data)
@@ -448,8 +436,12 @@ def share_bot_callback(call):
     
     user_data = initialize_user_data(user_id)
     
-    # حساب التقدم والمتبقي للمستوى
-    progress_percent = min(100, int((user_data['progress'] / 1000) * 100)) if user_data['progress'] > 0 else 0
+    # حساب التقدم والمتبقي للمستوى بناءً على التراكمي
+    total_cumulative = user_data['total_cumulative']
+    current_level = user_data['level']
+    progress = user_data['progress']
+    next_level_remaining = user_data['next_level_remaining']
+    progress_percent = min(100, int((progress / 1000) * 100)) if progress > 0 else 0
     
     share_lines = [
         "قال رسول الله ﷺ:",
@@ -464,11 +456,12 @@ def share_bot_callback(call):
         "• إحصائيات مفصلة",
         "• تذكيرات يومية",
         "",
-        f"🏆 مستواي الحالي: {user_data['level']}",
+        f"🏆 مستواي الحالي: {current_level}",
         f"🔥 سلسلة أيامي: {user_data['daily_streak']} يوم",
         "",
-        f"🎯 تقدمي: {user_data['progress']}/1000 ({progress_percent}%)",
-        f"⏳ المتبقي للمستوى التالي: {user_data['next_level_remaining']} ذكر"
+        f"🎯 تقدمي: {progress}/1000 ({progress_percent}%)",
+        f"⏳ المتبقي للمستوى التالي: {next_level_remaining} ذكر",
+        f"💎 أذكاري التراكمية: {total_cumulative}"
     ]
     
     share_text = "\n".join(share_lines)
@@ -526,8 +519,10 @@ def show_stats_callback(call):
     
     user_data = initialize_user_data(user_id)
     
-    # حساب التقدم للمستوى التالي
-    progress_percent = min(100, int((user_data['progress'] / 1000) * 100)) if user_data['progress'] > 0 else 0
+    # حساب التقدم للمستوى التالي بناءً على التراكمي
+    progress = user_data['progress']
+    next_level_remaining = user_data['next_level_remaining']
+    progress_percent = min(100, int((progress / 1000) * 100)) if progress > 0 else 0
     
     stats_message = f"""
 📊 إحصائياتك الشخصية:
@@ -544,13 +539,13 @@ def show_stats_callback(call):
 • لا إله إلا الله: {user_data['la_ilaha_count']} مرة
 • الله اكبر: {user_data['allahu_akbar_count']} مرة
 
-📈 الإجمالي: {user_data['total_cumulative']} ذكر (تراكمي)
+📈 الإجمالي التراكمي: {user_data['total_cumulative']} ذكر
 📈 الإجمالي الحالي: {user_data['total_count']} ذكر
 🏆 المستوى: {user_data['level']}
 📅 سلسلة الأيام: {user_data['daily_streak']} يوم
 
-🎯 التقدم: {user_data['progress']}/1000 ({progress_percent}%)
-⏳ المتبقي للمستوى التالي: {user_data['next_level_remaining']} ذكر
+🎯 التقدم: {progress}/1000 ({progress_percent}%)
+⏳ المتبقي للمستوى التالي: {next_level_remaining} ذكر
 
 💎 الحسنات المكتسبة: {user_data['total_cumulative'] * 10} حسنة بإذن الله
     """
@@ -622,7 +617,7 @@ def export_data_callback(call):
 لا إله إلا الله: {user_data['la_ilaha_count']}
 الله اكبر: {user_data['allahu_akbar_count']}
 
-📊 الإجمالي: {user_data['total_cumulative']} (تراكمي)
+📊 الإجمالي التراكمي: {user_data['total_cumulative']}
 📊 الإجمالي الحالي: {user_data['total_count']}
 🏆 المستوى: {user_data['level']}
 🔥 سلسلة الأيام: {user_data['daily_streak']}
@@ -767,6 +762,7 @@ def admin_panel(message):
         types.InlineKeyboardButton("📥 تصدير البيانات", callback_data="export_all_data")
     )
     keyboard.add(
+        types.InlineKeyboardButton("📤 استيراد البيانات", callback_data="import_data"),
         types.InlineKeyboardButton("📨 إنشاء رسالة", callback_data="create_message")
     )
     
@@ -801,26 +797,64 @@ def export_all_data(call):
         return
     
     try:
-        # تحويل البيانات إلى نص قابل للقراءة
-        data_text = "بيانات جميع المستخدمين:\n\n"
-        for user_id, user_data in users_data.items():
-            data_text += f"المستخدم: {user_id}\n"
-            for key, value in user_data.items():
-                data_text += f"{key}: {value}\n"
-            data_text += "\n"
+        # تحويل البيانات إلى JSON
+        with data_lock:
+            data_json = json.dumps(users_data, indent=2, ensure_ascii=False)
         
-        # إرسال البيانات كملف نصي
-        with io.BytesIO(data_text.encode('utf-8')) as data_file:
-            data_file.name = 'users_data.txt'
+        # إرسال البيانات كملف
+        with io.BytesIO(data_json.encode('utf-8')) as data_file:
+            data_file.name = 'users_data.json'
             bot.send_document(
                 call.message.chat.id,
                 data_file,
-                caption="📦 بيانات جميع المستخدمين"
+                caption="📦 بيانات جميع المستخدمين (JSON)"
             )
         bot.answer_callback_query(call.id, "✅ تم تصدير البيانات بنجاح")
     except Exception as e:
         logger.error(f"Error exporting data: {e}")
         bot.answer_callback_query(call.id, "❌ فشل في تصدير البيانات")
+
+@bot.callback_query_handler(func=lambda call: call.data == 'import_data')
+def import_data(call):
+    user_id = call.from_user.id
+    
+    if not is_admin(user_id):
+        bot.answer_callback_query(call.id, "⛔ غير مسموح لك بهذا الإجراء")
+        return
+    
+    msg = bot.send_message(
+        call.message.chat.id,
+        "📤 أرسل ملف البيانات الآن (يجب أن يكون ملف JSON باسم users_data.json)"
+    )
+    bot.register_next_step_handler(msg, process_import_file)
+
+def process_import_file(message):
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        return
+    
+    if not message.document:
+        bot.reply_to(message, "❌ لم يتم إرسال ملف، يرجى المحاولة مرة أخرى")
+        return
+    
+    try:
+        # تحميل الملف
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        # تحميل البيانات
+        new_data = json.loads(downloaded_file.decode('utf-8'))
+        
+        # استبدال البيانات الحالية
+        with data_lock:
+            global users_data
+            users_data = new_data
+        
+        bot.reply_to(message, "✅ تم استيراد البيانات بنجاح")
+    except Exception as e:
+        logger.error(f"Error importing data: {e}")
+        bot.reply_to(message, f"❌ فشل في استيراد البيانات: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'create_message')
 def create_message(call):
@@ -860,13 +894,13 @@ def broadcast_message(message):
             failed += 1
     
     # إرسال التقرير
-    bot.reply_to(
-        message,
-        f"📤 تقرير إرسال الرسالة:\n"
-        f"• إجمالي المستخدمين: {total_users}\n"
-        f"• تم الإرسال بنجاح: {success}\n"
-        f"• فشل في الإرسال: {failed}"
-    )
+    report = f"""
+📤 تقرير إرسال الرسالة:
+• إجمالي المستخدمين: {total_users}
+• تم الإرسال بنجاح: {success}
+• فشل في الإرسال: {failed}
+"""
+    bot.reply_to(message, report)
 
 # تشغيل البوت
 if __name__ == '__main__':
