@@ -7,6 +7,7 @@ import threading
 import time
 from flask import Flask, Response
 import urllib.parse
+import random
 
 # تكوين السجلات
 logging.basicConfig(
@@ -37,12 +38,28 @@ data_lock = threading.Lock()
 
 # هيكل بيانات المستخدم الافتراضي
 default_user_data = {
+    'chat_id': None,
     'subhan_count': 0,
     'alhamdulillah_count': 0,
     'la_ilaha_count': 0,
     'allahu_akbar_count': 0,
     'total_count': 0
 }
+
+# قوائم الأذكار للتذكيرات
+morning_dhikr = [
+    "سبحان الله وبحمده، سبحان الله العظيم",
+    "أصبحنا وأصبح الملك لله، والحمد لله، لا إله إلا الله وحده لا شريك له، له الملك وله الحمد وهو على كل شيء قدير",
+    "اللهم بك أصبحنا، وبك أمسينا، وبك نحيا، وبك نموت، وإليك النشور",
+    "اللهم إني أصبحت أشهدك، وأشهد حملة عرشك، وملائكتك، وجميع خلقك، أنك أنت الله لا إله إلا أنت، وحدك لا شريك لك، وأن محمداً عبدك ورسولك"
+]
+
+evening_dhikr = [
+    "أمسينا وأمسى الملك لله، والحمد لله، لا إله إلا الله وحده لا شريك له، له الملك وله الحمد وهو على كل شيء قدير",
+    "أعوذ بكلمات الله التامات من شر ما خلق",
+    "اللهم بك أمسينا، وبك أصبحنا، وبك نحيا، وبك نموت، وإليك المصير",
+    "اللهم إني أمسيت أشهدك، وأشهد حملة عرشك، وملائكتك، وجميع خلقك، أنك أنت الله لا إله إلا أنت، وحدك لا شريك لك، وأن محمداً عبدك ورسولك"
+]
 
 def get_user_data(user_id):
     with data_lock:
@@ -54,10 +71,12 @@ def update_user_data(user_id, data):
             users_data[user_id] = default_user_data.copy()
         users_data[user_id].update(data)
 
-def initialize_user_data(user_id):
+def initialize_user_data(user_id, chat_id=None):
     with data_lock:
         if user_id not in users_data:
             users_data[user_id] = default_user_data.copy()
+        if chat_id is not None:
+            users_data[user_id]['chat_id'] = chat_id
         return users_data[user_id].copy()
 
 def is_user_subscribed(user_id):
@@ -71,7 +90,7 @@ def is_user_subscribed(user_id):
 
 def get_main_keyboard(user_id):
     """إنشاء لوحة المفاتيح الرئيسية للأذكار"""
-    user_data = initialize_user_data(user_id)
+    user_data = get_user_data(user_id)
     
     keyboard = types.InlineKeyboardMarkup(row_width=2)
     
@@ -124,7 +143,7 @@ def get_main_message(user_id):
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
-    initialize_user_data(user_id)
+    initialize_user_data(user_id, message.chat.id)
     
     # التحقق من الاشتراك
     if is_user_subscribed(user_id):
@@ -187,7 +206,7 @@ def check_subscription(call):
 def show_main_menu(message):
     """عرض القائمة الرئيسية"""
     user_id = message.from_user.id
-    initialize_user_data(user_id)
+    initialize_user_data(user_id, message.chat.id)
     
     main_message = get_main_message(user_id)
     keyboard = get_main_keyboard(user_id)
@@ -223,12 +242,13 @@ def update_main_menu(user_id, chat_id):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('dhikr_'))
 def handle_dhikr_callback(call):
     user_id = call.from_user.id
+    initialize_user_data(user_id, call.message.chat.id)
     
     if not is_user_subscribed(user_id):
         bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً")
         return
     
-    user_data = initialize_user_data(user_id)
+    user_data = get_user_data(user_id)
     
     dhikr_type = call.data.split('_', 1)[1]
     
@@ -273,7 +293,8 @@ def handle_dhikr_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'show_stats')
 def show_stats(call):
     user_id = call.from_user.id
-    user_data = initialize_user_data(user_id)
+    initialize_user_data(user_id, call.message.chat.id)
+    user_data = get_user_data(user_id)
     
     if not is_user_subscribed(user_id):
         bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً")
@@ -312,12 +333,12 @@ def show_stats(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'reset_counters')
 def reset_counters_callback(call):
     user_id = call.from_user.id
+    initialize_user_data(user_id, call.message.chat.id)
+    user_data = get_user_data(user_id)
     
     if not is_user_subscribed(user_id):
         bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً")
         return
-    
-    user_data = initialize_user_data(user_id)
     
     # إعادة تعيين العدادات
     user_data['subhan_count'] = 0
@@ -337,12 +358,12 @@ def reset_counters_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'share_bot')
 def share_bot_callback(call):
     user_id = call.from_user.id
+    initialize_user_data(user_id, call.message.chat.id)
+    user_data = get_user_data(user_id)
     
     if not is_user_subscribed(user_id):
         bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً")
         return
-    
-    user_data = initialize_user_data(user_id)
     
     share_lines = [
         "📿 *بوت نُور الذِّكْر*",
@@ -388,14 +409,11 @@ def share_bot_callback(call):
         reply_markup=keyboard
     )
 
-# الإصلاح النهائي لزر المطور
 @bot.callback_query_handler(func=lambda call: call.data == 'developer_info')
 def developer_info_callback(call):
     try:
         user_id = call.from_user.id
-        
-        # إشعار المستخدم بأن العملية جارية
-        bot.answer_callback_query(call.id, "جاري فتح معلومات المطور...", show_alert=False)
+        initialize_user_data(user_id, call.message.chat.id)
         
         if not is_user_subscribed(user_id):
             bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً", show_alert=True)
@@ -409,7 +427,6 @@ def developer_info_callback(call):
             types.InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
         )
         
-        # نص بسيط بدون تنسيق قد يسبب مشاكل
         developer_text = (
             "👨‍💻 معلومات المطور:\n\n"
             "• الاسم: @Akio_co\n"
@@ -418,7 +435,6 @@ def developer_info_callback(call):
             "📞 تواصل معنا في أي وقت"
         )
         
-        # تحرير الرسالة الحالية بدون parse_mode
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
@@ -433,7 +449,7 @@ def developer_info_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_main')
 def back_to_main_callback(call):
     user_id = call.from_user.id
-    initialize_user_data(user_id)
+    initialize_user_data(user_id, call.message.chat.id)
     
     main_message = get_main_message(user_id)
     keyboard = get_main_keyboard(user_id)
@@ -450,6 +466,7 @@ def back_to_main_callback(call):
 @bot.message_handler(func=lambda message: True)
 def handle_text_messages(message):
     user_id = message.from_user.id
+    initialize_user_data(user_id, message.chat.id)
     
     if not is_user_subscribed(user_id):
         show_subscription_message(message)
@@ -476,6 +493,104 @@ def handle_text_messages(message):
         except Exception as e:
             logger.error(f"Error sending temporary message: {e}")
 
+# ==================== نظام التذكيرات اليومية ====================
+def send_daily_notifications(morning=True):
+    """إرسال تذكيرات يومية لجميع المستخدمين"""
+    try:
+        # نسخ قائمة المستخدمين لتجنب تغييرها أثناء التكرار
+        with data_lock:
+            user_ids = list(users_data.keys())
+        
+        for user_id in user_ids:
+            try:
+                user_data = users_data.get(user_id)
+                if not user_data:
+                    continue
+                    
+                chat_id = user_data.get('chat_id')
+                if chat_id is None:
+                    continue
+                
+                # التحقق من الاشتراك
+                if not is_user_subscribed(user_id):
+                    continue
+                
+                # إعداد الرسالة المناسبة
+                if morning:
+                    # رسالة الصباح
+                    message_text = "🌅 *صباح الخير! حان وقت شروق شمس الأجر* 🌞\n\n"
+                    message_text += "☀️ أسأل الله أن يجعل يومك بركة وذكراً وتقوى\n\n"
+                    message_text += "🌸 *ذكر الصباح المختار:*\n"
+                    message_text += f"➖ {random.choice(morning_dhikr)}\n\n"
+                    message_text += "🌟 *فائدة اليوم:*\n"
+                    message_text += "> \"من قال حين يصبح: سبحان الله وبحمده، مائة مرة، لم يأت أحد يوم القيامة بأفضل مما جاء به إلا أحد قال مثل ذلك أو زاد\" (رواه مسلم)\n\n"
+                    message_text += "📿 استمر في الذكر لتحصد الأجر المضاعف"
+                else:
+                    # رسالة المساء
+                    message_text = "🌄 *مساء الخير! حان وقت غروب شمس الثواب* 🌙\n\n"
+                    message_text += "🌠 أسأل الله أن يغفر لك ذنوبك ويرفع درجاتك\n\n"
+                    message_text += "🌸 *ذكر المساء المختار:*\n"
+                    message_text += f"➖ {random.choice(evening_dhikr)}\n\n"
+                    message_text += "🌟 *فائدة اليوم:*\n"
+                    message_text += "> \"من قال حين يمسي: سبحان الله وبحمده، مائة مرة، لم يأت أحد يوم القيامة بأفضل مما جاء به إلا أحد قال مثل ذلك أو زاد\" (رواه مسلم)\n\n"
+                    message_text += "📿 استمر في الذكر لتحصد الأجر المضاعف"
+                
+                # تصميم زر للوصول السريع للبوت
+                keyboard = types.InlineKeyboardMarkup()
+                keyboard.add(
+                    types.InlineKeyboardButton("📿 افتح بوت الذكر الآن", url="https://t.me/Ryukn_bot")
+                )
+                
+                # إرسال الرسالة بتنسيق جميل
+                bot.send_message(
+                    chat_id,
+                    message_text,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
+                )
+                
+                # تأجيل صغير لتجنب الضغط على الخادم
+                time.sleep(0.1)
+                
+            except telebot.apihelper.ApiException as e:
+                if e.result.status_code == 403:  # المستخدم حظر البوت
+                    logger.warning(f"User {user_id} blocked the bot. Removing from users_data.")
+                    with data_lock:
+                        if user_id in users_data:
+                            del users_data[user_id]
+                else:
+                    logger.error(f"Error sending notification to user {user_id}: {e}")
+            except Exception as e:
+                logger.error(f"Error in sending notification to user {user_id}: {e}")
+    
+    except Exception as e:
+        logger.error(f"Error in daily notifications: {e}")
+
+def schedule_daily_notifications():
+    """جدولة التذكيرات اليومية"""
+    while True:
+        try:
+            now = datetime.utcnow()
+            current_hour = now.hour
+            current_minute = now.minute
+            
+            # تذكير الصباح الساعة 7 صباحاً (توقيت غرينتش)
+            if current_hour == 7 and current_minute == 0:
+                send_daily_notifications(morning=True)
+                logger.info("Sent morning notifications")
+            
+            # تذكير المساء الساعة 7 مساءً (توقيت غرينتش)
+            elif current_hour == 19 and current_minute == 0:
+                send_daily_notifications(morning=False)
+                logger.info("Sent evening notifications")
+            
+            # الانتظار 60 ثانية قبل التحقق مرة أخرى
+            time.sleep(60)
+            
+        except Exception as e:
+            logger.error(f"Error in notification scheduler: {e}")
+            time.sleep(60)  # انتظار قبل إعادة المحاولة
+
 def run_flask_app():
     """تشغيل خادم Flask"""
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
@@ -488,6 +603,10 @@ if __name__ == '__main__':
         # بدء خيط خادم الويب
         web_thread = threading.Thread(target=run_flask_app, daemon=True)
         web_thread.start()
+        
+        # بدء خيط التذكيرات اليومية
+        notification_thread = threading.Thread(target=schedule_daily_notifications, daemon=True)
+        notification_thread.start()
         
         # تشغيل البوت
         bot.infinity_polling(none_stop=True, timeout=30)
