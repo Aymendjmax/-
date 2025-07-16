@@ -6,6 +6,7 @@ from datetime import datetime
 import threading
 import time
 from flask import Flask, Response
+import urllib.parse
 
 # تكوين السجلات
 logging.basicConfig(
@@ -86,7 +87,7 @@ def get_main_keyboard(user_id):
     
     # أزرار الخيارات
     keyboard.add(
-        types.InlineKeyboardButton(f"📊 مجموع ذكرك ({user_data['total_count']})", callback_data="show_total"),
+        types.InlineKeyboardButton("📊 عرض إحصائياتي", callback_data="show_stats"),
         types.InlineKeyboardButton("🗑️ مسح عدادي", callback_data="reset_counters")
     )
     keyboard.add(
@@ -102,17 +103,20 @@ def get_main_message(user_id):
 🌺 بسم الله الرحمن الرحيم 
 اللهم صلي وسلم وبارك على سيدنا محمد 🌹
 
-📿 مرحباً بك في بوت نُور الذِّكْر 
+📿 *مرحباً بك في بوت نُور الذِّكْر* 
 هنا تجني الأجر وتنال الثواب بإذن الله تعالى
 
-✨ طريقة الاستخدام:
-اضغط على أي ذكر لزيادة العداد ورفع درجاتك في الجنة
+✨ *طريقة الاستخدام:*
+- اضغط على أي ذكر لزيادة العداد ورفع درجاتك في الجنة
+- استخدم زر "📊 عرض إحصائياتي" لمشاهدة تفاصيل أذكارك
+- شارك البوت مع أحبابك لنيل الأجر والثواب
 
-🌿 فوائد الذكر:
+🌿 *فوائد الذكر:*
 • كل ذكر = 10 حسنات ⭐
 • محو الذنوب والخطايا 🍃
 • رفع الدرجات في الجنة 🕌
 • طمأنينة القلب والروح 💖
+• تقوية الإيمان واليقين ✨
     """
     
     return welcome_message
@@ -139,7 +143,7 @@ def show_subscription_message(message):
     )
     
     subscription_message = f"""
-🕌 مرحباً بك في بوت نُور الذِّكْر
+🕌 *مرحباً بك في بوت نُور الذِّكْر*
 
 ⚠️ للاستفادة من البوت، يجب الاشتراك في القناة أولاً
 
@@ -151,6 +155,7 @@ def show_subscription_message(message):
     bot.send_message(
         message.chat.id,
         subscription_message,
+        parse_mode="Markdown",
         reply_markup=keyboard
     )
 
@@ -188,7 +193,7 @@ def show_main_menu(message):
     keyboard = get_main_keyboard(user_id)
     
     # إرسال الرسالة الرئيسية وحفظ معرفها
-    sent_message = bot.send_message(message.chat.id, main_message, reply_markup=keyboard)
+    sent_message = bot.send_message(message.chat.id, main_message, parse_mode="Markdown", reply_markup=keyboard)
     user_messages[user_id] = sent_message.message_id
 
 def update_main_menu(user_id, chat_id):
@@ -202,11 +207,12 @@ def update_main_menu(user_id, chat_id):
                 main_message,
                 chat_id,
                 user_messages[user_id],
+                parse_mode="Markdown",
                 reply_markup=keyboard
             )
         else:
             # إعادة إنشاء القائمة إذا تم حذف الرسالة
-            show_main_menu(types.Message(message_id=0, chat=types.Chat(id=chat_id), from_user=types.User(id=user_id)))
+            show_main_menu(types.Message(message_id=0, chat=types.Chat(id=chat_id), from_user=types.User(id=user_id))
     except Exception as e:
         logger.error(f"Error updating main menu: {e}")
 
@@ -261,18 +267,43 @@ def handle_dhikr_callback(call):
         # تحديث القائمة الرئيسية
         update_main_menu(user_id, call.message.chat.id)
 
-@bot.callback_query_handler(func=lambda call: call.data == 'show_total')
-def show_total(call):
+@bot.callback_query_handler(func=lambda call: call.data == 'show_stats')
+def show_stats(call):
     user_id = call.from_user.id
     user_data = initialize_user_data(user_id)
+    
+    if not is_user_subscribed(user_id):
+        bot.answer_callback_query(call.id, "❌ يجب الاشتراك في القناة أولاً")
+        return
     
     total = user_data['total_count']
     hasanat = total * 10
     
-    bot.answer_callback_query(
-        call.id,
-        f"📊 مجموع أذكارك: {total}\n💎 الحسنات: {hasanat} بإذن الله",
-        show_alert=True
+    stats_message = f"""
+📊 *إحصائيات أذكارك التفصيلية:*
+
+• سبحان الله: {user_data['subhan_count']} مرة 🌟
+• الحمد لله: {user_data['alhamdulillah_count']} مرة 🤲
+• لا إله إلا الله: {user_data['la_ilaha_count']} مرة 🕌
+• الله أكبر: {user_data['allahu_akbar_count']} مرة 🌙
+
+📈 *المجموع الكلي:* {total} ذكر
+💎 *الحسنات المكتسبة:* {hasanat} حسنة بإذن الله
+
+✨ واصل ذكر الله لترتفع درجاتك في الجنة
+    """
+    
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(
+        types.InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
+    )
+    
+    bot.edit_message_text(
+        stats_message,
+        call.message.chat.id,
+        call.message.message_id,
+        parse_mode="Markdown",
+        reply_markup=keyboard
     )
 
 @bot.callback_query_handler(func=lambda call: call.data == 'reset_counters')
@@ -311,27 +342,34 @@ def share_bot_callback(call):
     user_data = initialize_user_data(user_id)
     
     share_lines = [
+        "📿 *بوت نُور الذِّكْر*",
+        "أداة رائعة لذكر الله وتحصيل الأجر",
+        "",
         "قال رسول الله ﷺ:",
         "\"من دعا إلى هدى كان له من الأجر مثل أجور من تبعه\"",
         "",
-        "📿 بوت نُور الذِّكْر:",
-        "https://t.me/Ryukn_bot",
-        "",
-        "✨ مميزات البوت:",
+        "✨ *مميزات البوت:*",
         "• عدّاد الأذكار التلقائي",
         "• إحصائيات مفصلة",
         "• تذكيرات يومية",
+        "• سهولة الاستخدام",
         "",
-        f"💎 أذكاري: {user_data['total_count']}"
+        f"💎 أذكاري: {user_data['total_count']}",
+        "",
+        "انضم الآن: https://t.me/Ryukn_bot"
     ]
     
     share_text = "\n".join(share_lines)
+    
+    # ترميز النص للمشاركة
+    encoded_text = urllib.parse.quote(share_text)
+    share_url = f"https://t.me/share/url?url=https://t.me/Ryukn_bot&text={encoded_text}"
     
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton(
             "📤 مشاركة البوت", 
-            url=f"https://t.me/share/url?url=https://t.me/Ryukn_bot&text={share_text}"
+            url=share_url
         )
     )
     keyboard.add(
@@ -339,9 +377,11 @@ def share_bot_callback(call):
     )
     
     bot.edit_message_text(
-        share_text,
+        "📤 *شارك البوت مع أحبابك لنيل الأجر والثواب*\n\n"
+        "اضغط على الزر أدناه لمشاركة البوت عبر التليجرام",
         call.message.chat.id,
         call.message.message_id,
+        parse_mode="Markdown",
         reply_markup=keyboard
     )
 
@@ -362,11 +402,14 @@ def developer_info_callback(call):
     )
     
     bot.edit_message_text(
-        f"👨‍💻 مطور البوت: @Akio_co\n\n"
+        "👨‍💻 *معلومات المطور:*\n\n"
+        "• الاسم: @Akio_co\n"
+        "• المهمة: تطوير وتحديث البوت\n\n"
         "🔧 لأي استفسار، اقتراح، أو مشكلة تقنية\n"
         "📞 تواصل معنا في أي وقت",
         call.message.chat.id,
         call.message.message_id,
+        parse_mode="Markdown",
         reply_markup=keyboard
     )
 
@@ -382,6 +425,7 @@ def back_to_main_callback(call):
         main_message,
         call.message.chat.id,
         call.message.message_id,
+        parse_mode="Markdown",
         reply_markup=keyboard
     )
 
